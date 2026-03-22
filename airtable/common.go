@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -92,8 +93,8 @@ type testErrorBody struct {
 	} `json:"error"`
 }
 
-func newHttpRequest(verb string, url string, body io.Reader) (*http.Request, error) {
-	httpReq, err := http.NewRequest(verb, url, body)
+func newHttpRequest(ctx context.Context, verb string, url string, body io.Reader) (*http.Request, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, verb, url, body)
 
 	if err != nil {
 		return nil, err

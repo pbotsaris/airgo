@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -24,7 +25,7 @@ func (d destroyResp) Err() map[string]string {
 	return d.Error
 }
 
-func destroy[T any](deleteUrl string, records ...*Record[T]) ([]*destroyedRecord, error) {
+func destroy[T any](ctx context.Context, deleteUrl string, records ...*Record[T]) ([]*destroyedRecord, error) {
 
 	var destroyed []*destroyedRecord
 	var resp destroyResp
@@ -44,8 +45,8 @@ func destroy[T any](deleteUrl string, records ...*Record[T]) ([]*destroyedRecord
 	query.AddRecordIds(recordIds...)
 	queryUrl := query.Flush()
 
-	err := retry.Do(func() error {
-		httpReq, err := newHttpRequest(http.MethodDelete, queryUrl, nil)
+	err := retry.DoCtx(ctx, func() error {
+		httpReq, err := newHttpRequest(ctx, http.MethodDelete, queryUrl, nil)
 		if err != nil {
 			return fmt.Errorf("airtable.destroy: Failed to create http request: %v", err)
 		}

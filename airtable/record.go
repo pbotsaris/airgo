@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/Antfood/airgo/utils"
@@ -40,6 +41,34 @@ type Record[T any] struct {
 }
 
 /*
+SaveCtx updates the existing record in the Airtable.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	record.Fields.Name = "Updated Name"
+	err = record.SaveCtx(ctx)
+*/
+func (r *Record[T]) SaveCtx(ctx context.Context) error {
+	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
+
+	fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
+
+	if err != nil {
+		return fmt.Errorf("airtable.Record.Save: %s", err.Error())
+	}
+
+	/* If the record has no Id, it's a new record */
+
+	if r.Id == "" {
+		return insert(ctx, url, Records[T]{r}, createRequest{Fields: fields, Typecast: r.Typecast})
+	}
+
+	return update(ctx, url, Records[T]{r}, updateRequest{Id: r.Id, Fields: fields, Typecast: r.Typecast})
+}
+
+/*
 Save updates the existing record in the Airtable.
 
 Example:
@@ -54,38 +83,22 @@ Example:
 	err = record.Save()
 */
 func (r *Record[T]) Save() error {
-	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
-
-	fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
-
-	if err != nil {
-		return fmt.Errorf("airtable.Record.Save: %s", err.Error())
-	}
-
-	/* If the record has no Id, it's a new record */
-
-	if r.Id == "" {
-      return insert(url, Records[T]{r}, createRequest{Fields: fields, Typecast: r.Typecast})
-	}
-
-   return update(url, Records[T]{r}, updateRequest{Id: r.Id, Fields: fields, Typecast: r.Typecast})
+	return r.SaveCtx(context.Background())
 }
 
 /*
-Destroy deletes the current record from the Airtable and returns details of the destroyed record.
+DestroyCtx deletes the current record from the Airtable and returns details of the destroyed record.
+It accepts a context for cancellation and timeout control.
 
 Example:
 
-	table := airtable.NewTable[MySchema]("baseId", "tableId")
-	record, err := table.Get("rec123")
-
-	// Delete the record
-	destroyed, err := record.Destroy()
+	ctx := context.Background()
+	destroyed, err := record.DestroyCtx(ctx)
 */
-func (r *Record[T]) Destroy() (*destroyedRecord, error) {
+func (r *Record[T]) DestroyCtx(ctx context.Context) (*destroyedRecord, error) {
 	url := createRequestUrl(r.BaseId, r.TableId)
 
-	records, err := destroy(url, r)
+	records, err := destroy(ctx, url, r)
 
 	if err != nil {
 		return nil, err
@@ -103,6 +116,47 @@ func (r *Record[T]) Destroy() (*destroyedRecord, error) {
 }
 
 /*
+Destroy deletes the current record from the Airtable and returns details of the destroyed record.
+
+Example:
+
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	record, err := table.Get("rec123")
+
+	// Delete the record
+	destroyed, err := record.Destroy()
+*/
+func (r *Record[T]) Destroy() (*destroyedRecord, error) {
+	return r.DestroyCtx(context.Background())
+}
+
+/*
+ReplaceCtx performs a full replacement of the record in Airtable using PUT.
+Unlike SaveCtx (which uses PATCH for updates), ReplaceCtx will clear any fields not provided.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	record.Fields = MySchema{Name: "New Name"} // Age will be cleared
+	err = record.ReplaceCtx(ctx)
+*/
+func (r *Record[T]) ReplaceCtx(ctx context.Context) error {
+	if r.Id == "" {
+		return fmt.Errorf("airtable.Record.Replace: Cannot replace record without Id")
+	}
+
+	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
+
+	fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
+	if err != nil {
+		return fmt.Errorf("airtable.Record.Replace: %s", err.Error())
+	}
+
+	return replace(ctx, url, Records[T]{r}, replaceRequest{Id: r.Id, Fields: fields, Typecast: r.Typecast})
+}
+
+/*
 Replace performs a full replacement of the record in Airtable using PUT.
 Unlike Save (which uses PATCH for updates), Replace will clear any fields not provided.
 
@@ -117,18 +171,7 @@ Example:
 	err = record.Replace()
 */
 func (r *Record[T]) Replace() error {
-	if r.Id == "" {
-		return fmt.Errorf("airtable.Record.Replace: Cannot replace record without Id")
-	}
-
-	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
-
-	fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
-	if err != nil {
-		return fmt.Errorf("airtable.Record.Replace: %s", err.Error())
-	}
-
-	return replace(url, Records[T]{r}, replaceRequest{Id: r.Id, Fields: fields, Typecast: r.Typecast})
+	return r.ReplaceCtx(context.Background())
 }
 
 /*

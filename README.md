@@ -1,5 +1,4 @@
 # airgo
-
 A type-safe Go client for the Airtable API using generics.
 
 ## Design
@@ -262,6 +261,22 @@ type Field struct {
     Options     map[string]any // Type-specific options
 }
 ```
+
+## Context Support
+
+All operations have `*Ctx` variants for cancellation and timeout control:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+records, err := table.ListCtx(ctx)
+record, err := table.GetCtx(ctx, "recXXX")
+err = table.CreateCtx(ctx, records...)
+err = record.SaveCtx(ctx)
+```
+
+Context is checked between pagination pages and retry attempts. Methods without context (e.g., `List()`) use `context.Background()` internally.
 
 ## Error Handling
 

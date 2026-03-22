@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"net/http"
@@ -128,6 +129,104 @@ func DoWithResponse(fn func() (*http.Response, error), opts ...Option) (*http.Re
 
 		jittered := jitter(delay)
 		time.Sleep(jittered)
+
+		delay = nextDelay(delay, cfg.Multiplier, cfg.MaxDelay)
+	}
+
+	return resp, err
+}
+
+// DoCtx is like Do but respects context cancellation.
+// It checks the context before each retry attempt and returns early if cancelled.
+func DoCtx(ctx context.Context, fn func() error, opts ...Option) error {
+	cfg := defaults()
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = defaultMaxAttempts
+	}
+
+	var err error
+	delay := cfg.InitialDelay
+
+	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		err = fn()
+		if err == nil {
+			return nil
+		}
+
+		if !IsRetryable(err) {
+			return err
+		}
+
+		if attempt == cfg.MaxAttempts {
+			break
+		}
+
+		jittered := jitter(delay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(jittered):
+		}
+
+		delay = nextDelay(delay, cfg.Multiplier, cfg.MaxDelay)
+	}
+
+	return err
+}
+
+// DoWithResponseCtx is like DoWithResponse but respects context cancellation.
+// It checks the context before each retry attempt and returns early if cancelled.
+func DoWithResponseCtx(ctx context.Context, fn func() (*http.Response, error), opts ...Option) (*http.Response, error) {
+	cfg := defaults()
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = defaultMaxAttempts
+	}
+
+	var resp *http.Response
+	var err error
+	delay := cfg.InitialDelay
+
+	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		resp, err = fn()
+
+		if err == nil && resp != nil && (resp.StatusCode == 429 || resp.StatusCode >= 500) {
+			resp.Body.Close()
+			err = &HTTPError{StatusCode: resp.StatusCode}
+			resp = nil
+		}
+
+		if err == nil {
+			return resp, nil
+		}
+
+		if !IsRetryable(err) {
+			return resp, err
+		}
+
+		if attempt == cfg.MaxAttempts {
+			break
+		}
+
+		jittered := jitter(delay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(jittered):
+		}
 
 		delay = nextDelay(delay, cfg.Multiplier, cfg.MaxDelay)
 	}

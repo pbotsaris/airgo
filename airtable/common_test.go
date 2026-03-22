@@ -2,6 +2,7 @@ package airtable
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,7 @@ func TestNewHttpRequest(t *testing.T) {
 	url := "http://www.example.com"
 	contentType := "application/json"
 
-	httpReq, err := newHttpRequest(http.MethodGet, url, bytes.NewBuffer(json))
+	httpReq, err := newHttpRequest(context.Background(), http.MethodGet, url, bytes.NewBuffer(json))
 	Ok(t, err)
 	Assert(t, http.MethodGet == httpReq.Method, "Expected '%s', got '%s'", http.MethodGet, httpReq.Method)
 	Assert(t, httpReq.URL.String() == url, "Expected '%s', got '%s'", url, httpReq.URL.String())
@@ -40,7 +41,7 @@ func TestMakeRequest(t *testing.T) {
 
 	client := newMockClient(200, jsonData, nil)
 
-	httpReq, err := newHttpRequest(http.MethodGet, "https://mock.com", bytes.NewBuffer(jsonData))
+	httpReq, err := newHttpRequest(context.Background(), http.MethodGet, "https://mock.com", bytes.NewBuffer(jsonData))
 	Ok(t, err)
 
 	resp := new(listResp[TestListRecordSchema])

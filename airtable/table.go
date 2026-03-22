@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"slices"
@@ -235,6 +236,31 @@ func (t *Table[T]) WithRecordMetadata(metadata ...string) *Table[T] {
 }
 
 /*
+ListCtx retrieves records from a table based on the provided schema T.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	records, err := table.ListCtx(ctx)
+*/
+func (t *Table[T]) ListCtx(ctx context.Context) (Records[T], error) {
+	url := createRequestUrl(t.BaseId, t.TableId)
+	records, err := list[T](ctx, url, t.Options)
+
+	for _, r := range records {
+		r.BaseId = t.BaseId
+		r.TableId = t.TableId
+	}
+
+	t.Options = defaultOptions
+	return records, err
+}
+
+/*
 List retrieves records from from a table base on the provided schema T.
 
 Example:
@@ -247,18 +273,24 @@ Example:
 	table := airtable.NewTable[MySchema]("baseId", "tableId")
 	records, err := table.List()
 */
-
 func (t *Table[T]) List() (Records[T], error) {
+	return t.ListCtx(context.Background())
+}
+
+/*
+GetCtx retrieves a single record with a given ID.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	record, err := table.GetCtx(ctx, "rec123")
+*/
+func (t Table[T]) GetCtx(ctx context.Context, id string) (Record[T], error) {
+	record := Record[T]{Id: id, TableId: t.TableId, BaseId: t.BaseId}
 	url := createRequestUrl(t.BaseId, t.TableId)
-	records, err := list[T](url, t.Options)
-
-	for _, r := range records {
-		r.BaseId = t.BaseId
-		r.TableId = t.TableId
-	}
-
-	t.Options = defaultOptions
-	return records, err
+	return get(ctx, url, record)
 }
 
 /*
@@ -270,9 +302,34 @@ Example:
 	record, err := table.Get("rec123")
 */
 func (t Table[T]) Get(id string) (Record[T], error) {
-	record := Record[T]{Id: id, TableId: t.TableId, BaseId: t.BaseId}
+	return t.GetCtx(context.Background(), id)
+}
+
+/*
+UpdateCtx updates a set of records in the Airtable.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	err := table.UpdateCtx(ctx, records...)
+*/
+func (t Table[T]) UpdateCtx(ctx context.Context, records ...*Record[T]) error {
 	url := createRequestUrl(t.BaseId, t.TableId)
-	return get(url, record)
+
+	updateRequests := make([]updateRequest, len(records))
+
+	for i, r := range records {
+		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
+
+		if err != nil {
+			return fmt.Errorf("airtable.Update: Error converting struct to map: %v", err)
+		}
+		updateRequests[i] = updateRequest{r.Id, fields, t.Options.Typecast}
+	}
+
+	return update(ctx, url, records, updateRequests...)
 }
 
 /*
@@ -293,20 +350,35 @@ Example:
 	   err := table.Update(records...)
 */
 func (t Table[T]) Update(records ...*Record[T]) error {
+	return t.UpdateCtx(context.Background(), records...)
+}
+
+/*
+ReplaceCtx performs a full replacement of records in the Airtable using PUT.
+Unlike UpdateCtx (PATCH), ReplaceCtx will clear any fields not provided in the request.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	err := table.ReplaceCtx(ctx, records...)
+*/
+func (t Table[T]) ReplaceCtx(ctx context.Context, records ...*Record[T]) error {
 	url := createRequestUrl(t.BaseId, t.TableId)
 
-	updateRequests := make([]updateRequest, len(records))
+	replaceRequests := make([]replaceRequest, len(records))
 
 	for i, r := range records {
-		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
+		fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
 
 		if err != nil {
-			return fmt.Errorf("airtable.Update: Error converting struct to map: %v", err)
+			return fmt.Errorf("airtable.Replace: Error converting struct to map: %v", err)
 		}
-		updateRequests[i] = updateRequest{r.Id, fields, t.Options.Typecast}
+		replaceRequests[i] = replaceRequest{r.Id, fields, t.Options.Typecast}
 	}
 
-	return update(url, records, updateRequests...)
+	return replace(ctx, url, records, replaceRequests...)
 }
 
 /*
@@ -327,20 +399,35 @@ Example:
 	err := table.Replace(records...)
 */
 func (t Table[T]) Replace(records ...*Record[T]) error {
+	return t.ReplaceCtx(context.Background(), records...)
+}
+
+/*
+CreateCtx creates a set of records in the Airtable.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	err := table.CreateCtx(ctx, records...)
+*/
+func (t Table[T]) CreateCtx(ctx context.Context, records ...*Record[T]) error {
 	url := createRequestUrl(t.BaseId, t.TableId)
 
-	replaceRequests := make([]replaceRequest, len(records))
+	createRequests := make([]createRequest, len(records))
 
 	for i, r := range records {
-		fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
+		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
 
 		if err != nil {
-			return fmt.Errorf("airtable.Replace: Error converting struct to map: %v", err)
+			return fmt.Errorf("airtable.Create: Error converting struct to map: %v", err)
 		}
-		replaceRequests[i] = replaceRequest{r.Id, fields, t.Options.Typecast}
+
+		createRequests[i] = createRequest{fields, t.Options.Typecast}
 	}
 
-	return replace(url, records, replaceRequests...)
+	return insert(ctx, url, records, createRequests...)
 }
 
 /*
@@ -360,25 +447,33 @@ Example:
 	   err := table.Create(records...)
 */
 func (t Table[T]) Create(records ...*Record[T]) error {
-	url := createRequestUrl(t.BaseId, t.TableId)
-
-	createRequests := make([]createRequest, len(records))
-
-	for i, r := range records {
-		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
-
-		if err != nil {
-			return fmt.Errorf("airtable.Update: Error converting struct to map: %v", err)
-		}
-
-		createRequests[i] = createRequest{fields, t.Options.Typecast}
-	}
-
-	return insert(url, records, createRequests...)
+	return t.CreateCtx(context.Background(), records...)
 }
 
 /*
-	Destroy deletes a set of records in the Airtable and returns details of the destroyed records.
+DestroyCtx deletes a set of records in the Airtable and returns details of the destroyed records.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	destroyedRecords, err := table.DestroyCtx(ctx, records...)
+*/
+func (t Table[T]) DestroyCtx(ctx context.Context, records ...*Record[T]) ([]*destroyedRecord, error) {
+	url := createRequestUrl(t.BaseId, t.TableId)
+	resp, err := destroy(ctx, url, records...)
+
+	for _, r := range resp {
+		r.BaseId = t.BaseId
+		r.TableId = t.TableId
+	}
+
+	return resp, err
+}
+
+/*
+Destroy deletes a set of records in the Airtable and returns details of the destroyed records.
 
 Example:
 
@@ -391,15 +486,37 @@ Example:
 	      destroyedRecords, err := table.Destroy(records...)
 */
 func (t Table[T]) Destroy(records ...*Record[T]) ([]*destroyedRecord, error) {
-	url := createRequestUrl(t.BaseId, t.TableId)
-	resp, err := destroy(url, records...)
+	return t.DestroyCtx(context.Background(), records...)
+}
 
-	for _, r := range resp {
-		r.BaseId = t.BaseId
-		r.TableId = t.TableId
+/*
+FindCtx searches for records in the Airtable table based on a specific field and its value.
+It accepts a context for cancellation and timeout control.
+
+The method checks if the given field exists in the schema T. If the field doesn't exist, it returns an error.
+Otherwise, it uses the Airtable API's filter functionality to retrieve matching records.
+
+Note: The field parameter should match the JSON field name, not the Go struct field name.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	records, err := table.FindCtx(ctx, "name", "John")
+*/
+func (t Table[T]) FindCtx(ctx context.Context, field, value string) (Records[T], error) {
+	var schema T
+	fieldNames, err := utils.GetStructFieldJsonNames(schema)
+
+	if err != nil {
+		return nil, fmt.Errorf("airtable.Find: Error getting struct field json names: %v", err)
 	}
 
-	return resp, err
+	if slices.Contains(fieldNames, field) {
+		return t.WithFilter(fmt.Sprintf("{%s} = '%s'", field, value)).ListCtx(ctx)
+	}
+
+	return nil, fmt.Errorf("airtable.Find: Field '%s' not found in schema %v", field, schema)
 }
 
 /*
@@ -421,18 +538,35 @@ Example:
 	records, err := table.Find("name", "John")
 */
 func (t Table[T]) Find(field, value string) (Records[T], error) {
-	var schema T
-	fieldNames, err := utils.GetStructFieldJsonNames(schema)
+	return t.FindCtx(context.Background(), field, value)
+}
 
+/*
+GetFieldsCtx retrieves field metadata for this table from the Airtable Meta API.
+It accepts a context for cancellation and timeout control.
+Results are cached after the first call. Use RefreshFieldsCtx to force a refresh.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	fields, err := table.GetFieldsCtx(ctx)
+*/
+func (t *Table[T]) GetFieldsCtx(ctx context.Context) ([]Field, error) {
+	// Check cache first
+	if fields := cache.get(t.BaseId, t.TableId); fields != nil {
+		return fields, nil
+	}
+
+	// Fetch from Meta API
+	fields, err := fetchTableFields(ctx, t.BaseId, t.TableId)
 	if err != nil {
-		return nil, fmt.Errorf("airtable.Find: Error getting struct field json names: %v", err)
+		return nil, err
 	}
 
-	if slices.Contains(fieldNames, field) {
-		return t.WithFilter(fmt.Sprintf("{%s} = '%s'", field, value)).List()
-	}
-
-	return nil, fmt.Errorf("airtable.Find: Field '%s' not found in schema %v", field, schema)
+	// Cache the result
+	cache.set(t.BaseId, t.TableId, fields)
+	return fields, nil
 }
 
 /*
@@ -448,33 +582,21 @@ Example:
 	}
 */
 func (t *Table[T]) GetFields() ([]Field, error) {
-	// Check cache first
-	if fields := cache.get(t.BaseId, t.TableId); fields != nil {
-		return fields, nil
-	}
-
-	// Fetch from Meta API
-	fields, err := fetchTableFields(t.BaseId, t.TableId)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result
-	cache.set(t.BaseId, t.TableId, fields)
-	return fields, nil
+	return t.GetFieldsCtx(context.Background())
 }
 
 /*
-GetField retrieves a single field by name or ID.
+GetFieldCtx retrieves a single field by name or ID.
+It accepts a context for cancellation and timeout control.
 
 Example:
 
+	ctx := context.Background()
 	table := airtable.NewTable[MySchema]("baseId", "tableId")
-	field, err := table.GetField("Name")
-	fmt.Printf("Field ID: %s, Type: %s\n", field.Id, field.Type)
+	field, err := table.GetFieldCtx(ctx, "Name")
 */
-func (t *Table[T]) GetField(nameOrId string) (*Field, error) {
-	fields, err := t.GetFields()
+func (t *Table[T]) GetFieldCtx(ctx context.Context, nameOrId string) (*Field, error) {
+	fields, err := t.GetFieldsCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -489,6 +611,34 @@ func (t *Table[T]) GetField(nameOrId string) (*Field, error) {
 }
 
 /*
+GetField retrieves a single field by name or ID.
+
+Example:
+
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	field, err := table.GetField("Name")
+	fmt.Printf("Field ID: %s, Type: %s\n", field.Id, field.Type)
+*/
+func (t *Table[T]) GetField(nameOrId string) (*Field, error) {
+	return t.GetFieldCtx(context.Background(), nameOrId)
+}
+
+/*
+RefreshFieldsCtx clears the cache and fetches fresh field metadata from the Meta API.
+It accepts a context for cancellation and timeout control.
+
+Example:
+
+	ctx := context.Background()
+	table := airtable.NewTable[MySchema]("baseId", "tableId")
+	fields, err := table.RefreshFieldsCtx(ctx)
+*/
+func (t *Table[T]) RefreshFieldsCtx(ctx context.Context) ([]Field, error) {
+	cache.delete(t.BaseId, t.TableId)
+	return t.GetFieldsCtx(ctx)
+}
+
+/*
 RefreshFields clears the cache and fetches fresh field metadata from the Meta API.
 
 Example:
@@ -497,8 +647,7 @@ Example:
 	fields, err := table.RefreshFields() // Forces a fresh fetch
 */
 func (t *Table[T]) RefreshFields() ([]Field, error) {
-	cache.delete(t.BaseId, t.TableId)
-	return t.GetFields()
+	return t.RefreshFieldsCtx(context.Background())
 }
 
 /*

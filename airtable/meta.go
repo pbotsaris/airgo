@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -99,7 +100,7 @@ func ClearFieldCache() {
 	cache.fields = make(map[string][]Field)
 }
 
-func fetchTableFields(baseId, tableId string) ([]Field, error) {
+func fetchTableFields(ctx context.Context, baseId, tableId string) ([]Field, error) {
 	if client == nil {
 		return nil, fmt.Errorf("airtable.fetchTableFields: Undefined client. Use airtable.SetToken before request")
 	}
@@ -108,8 +109,8 @@ func fetchTableFields(baseId, tableId string) ([]Field, error) {
 
 	var resp metaResponse
 
-	err := retry.Do(func() error {
-		httpReq, err := newHttpRequest(http.MethodGet, url, nil)
+	err := retry.DoCtx(ctx, func() error {
+		httpReq, err := newHttpRequest(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return fmt.Errorf("airtable.fetchTableFields: Failed to create http request: %v", err)
 		}

@@ -2,6 +2,7 @@ package airtable
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,37 +21,37 @@ type ResponseBody[T any] struct {
 	Records Records[T] `json:"records"`
 }
 
-func update[T any](url string, records Records[T], req ...updateRequest) error {
-  var typecast bool
-
-  if len(req) > 0 {
-     typecast = req[0].Typecast
-  }
-   
-	return upsert(url, records, typecast, req...)
-}
-
-func insert[T any](url string, records Records[T], req ...createRequest) error {
+func update[T any](ctx context.Context, url string, records Records[T], req ...updateRequest) error {
 	var typecast bool
 
 	if len(req) > 0 {
 		typecast = req[0].Typecast
 	}
 
-	return upsert(url, records, typecast, req...)
+	return upsert(ctx, url, records, typecast, req...)
 }
 
-func replace[T any](url string, records Records[T], req ...replaceRequest) error {
+func insert[T any](ctx context.Context, url string, records Records[T], req ...createRequest) error {
 	var typecast bool
 
 	if len(req) > 0 {
 		typecast = req[0].Typecast
 	}
 
-	return upsert(url, records, typecast, req...)
+	return upsert(ctx, url, records, typecast, req...)
 }
 
-func upsert[T any, R createRequest | updateRequest | replaceRequest](url string, records Records[T], typecast bool, req ...R) error {
+func replace[T any](ctx context.Context, url string, records Records[T], req ...replaceRequest) error {
+	var typecast bool
+
+	if len(req) > 0 {
+		typecast = req[0].Typecast
+	}
+
+	return upsert(ctx, url, records, typecast, req...)
+}
+
+func upsert[T any, R createRequest | updateRequest | replaceRequest](ctx context.Context, url string, records Records[T], typecast bool, req ...R) error {
 
 	prefix := getMsgPrefix(req)
 
@@ -59,8 +60,8 @@ func upsert[T any, R createRequest | updateRequest | replaceRequest](url string,
 	}
 
 	reqBody := airtableBody[R]{
-		Records: req,
-      Typecast: typecast,
+		Records:  req,
+		Typecast: typecast,
 	}
 
 	respBody := ResponseBody[T]{
@@ -73,8 +74,8 @@ func upsert[T any, R createRequest | updateRequest | replaceRequest](url string,
 		return fmt.Errorf("%s Could not Marshal record:  %s", prefix, err.Error())
 	}
 
-	return retry.Do(func() error {
-		httpReq, err := newHttpRequest(getMethod(req), url, bytes.NewBuffer(jsonBody))
+	return retry.DoCtx(ctx, func() error {
+		httpReq, err := newHttpRequest(ctx, getMethod(req), url, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return fmt.Errorf("%s Could not create http request:  %v", prefix, err)
 		}

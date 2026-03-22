@@ -2,6 +2,7 @@ package airtable
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -40,7 +41,7 @@ type listSortField struct {
 	Direction string `json:"direction,omitempty"`
 }
 
-func list[T any](baseUrl string, opts Options) (Records[T], error) {
+func list[T any](ctx context.Context, baseUrl string, opts Options) (Records[T], error) {
 	var records Records[T]
 
 	if client == nil {
@@ -72,20 +73,25 @@ func list[T any](baseUrl string, opts Options) (Records[T], error) {
 
 	var offset string
 	for {
+		// Check context before each page request
+		if err := ctx.Err(); err != nil {
+			return records, err
+		}
+
 		var resp listResp[T]
 
-		err := retry.Do(func() error {
+		err := retry.DoCtx(ctx, func() error {
 			var httpReq *http.Request
 			var err error
 
 			if usePOST {
-				httpReq, err = createPOSTListRequest(baseUrl, opts, fieldNames, offset)
+				httpReq, err = createPOSTListRequest(ctx, baseUrl, opts, fieldNames, offset)
 			} else {
 				if offset != "" {
 					query.AddOffset(offset)
 					queryUrl = query.Flush()
 				}
-				httpReq, err = newHttpRequest(http.MethodGet, queryUrl, nil)
+				httpReq, err = newHttpRequest(ctx, http.MethodGet, queryUrl, nil)
 			}
 
 			if err != nil {
@@ -110,7 +116,7 @@ func list[T any](baseUrl string, opts Options) (Records[T], error) {
 	return records, nil
 }
 
-func createPOSTListRequest(baseUrl string, opts Options, fieldNames []string, offset string) (*http.Request, error) {
+func createPOSTListRequest(ctx context.Context, baseUrl string, opts Options, fieldNames []string, offset string) (*http.Request, error) {
 	body := listRequestBody{
 		Fields:          fieldNames,
 		FilterByFormula: opts.Filter,
@@ -141,7 +147,7 @@ func createPOSTListRequest(baseUrl string, opts Options, fieldNames []string, of
 
 	// POST to /listRecords endpoint
 	listUrl := baseUrl + "/listRecords"
-	return newHttpRequest(http.MethodPost, listUrl, bytes.NewBuffer(jsonBody))
+	return newHttpRequest(ctx, http.MethodPost, listUrl, bytes.NewBuffer(jsonBody))
 }
 
 func newQuery[T any](url string, opts Options) (*queryBuilder, error) {

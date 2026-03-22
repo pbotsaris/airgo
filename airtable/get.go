@@ -1,6 +1,7 @@
 package airtable
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,8 +9,7 @@ import (
 	"github.com/Antfood/airgo/retry"
 )
 
-func get[T any](getUrl string, record Record[T]) (Record[T], error) {
-
+func get[T any](ctx context.Context, getUrl string, record Record[T]) (Record[T], error) {
 
 	if client == nil {
 		return record, fmt.Errorf("airtable.Get: Undefined client. Use airtable.Init before request")
@@ -21,8 +21,8 @@ func get[T any](getUrl string, record Record[T]) (Record[T], error) {
 
 	url := fmt.Sprintf("%s/%s", getUrl, record.Id)
 
-	err := retry.Do(func() error {
-		httpReq, err := newHttpRequest(http.MethodGet, url, nil)
+	err := retry.DoCtx(ctx, func() error {
+		httpReq, err := newHttpRequest(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return err
 		}
