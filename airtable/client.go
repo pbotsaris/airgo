@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 /* Client is an interface for the http clients used by this package */
@@ -21,10 +22,21 @@ func (c AirtableClient) Do(req *http.Request) (*http.Response, error) {
 	return c.Client.Do(req)
 }
 
-/* NewAirtableClient returns a new AirtableClient */
+/* NewAirtableClient returns a new AirtableClient with default timeout */
 func NewAirtableClient() *AirtableClient {
 	return &AirtableClient{
-		Client: &http.Client{},
+		Client: &http.Client{
+			Timeout: DefaultRequestTimeout,
+		},
+	}
+}
+
+/* NewAirtableClientWithTimeout returns a new AirtableClient with a custom timeout */
+func NewAirtableClientWithTimeout(timeout time.Duration) *AirtableClient {
+	return &AirtableClient{
+		Client: &http.Client{
+			Timeout: timeout,
+		},
 	}
 }
 
