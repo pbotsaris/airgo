@@ -1,4 +1,4 @@
-.PHONY: test test-verbose test-unit test-integration test-record lint
+.PHONY: test test-verbose test-cover test-unit test-integration test-record lint
 
 # Run all tests (unit tests only, skips integration if no fixtures)
 test:
@@ -7,6 +7,10 @@ test:
 # Verbose test output
 test-verbose:
 	go test -v ./airtable/... ./retry/... ./utils/...
+
+# Run tests with coverage report
+test-cover:
+	go test -cover ./airtable/... ./retry/... ./utils/...
 
 # Run unit tests only (excludes integration tests)
 test-unit:
