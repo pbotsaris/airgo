@@ -1,6 +1,8 @@
 package airtable
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -18,25 +20,74 @@ func (l listResp[T]) Err() map[string]string {
 	return l.Error
 }
 
-func list[T any](url string, opts Options) (Records[T], error) {
+// listRequestBody represents the POST body for large queries
+type listRequestBody struct {
+	Fields          []string        `json:"fields,omitempty"`
+	FilterByFormula string          `json:"filterByFormula,omitempty"`
+	MaxRecords      int             `json:"maxRecords,omitempty"`
+	PageSize        int             `json:"pageSize,omitempty"`
+	Sort            []listSortField `json:"sort,omitempty"`
+	View            string          `json:"view,omitempty"`
+	CellFormat      string          `json:"cellFormat,omitempty"`
+	TimeZone        string          `json:"timeZone,omitempty"`
+	UserLocale      string          `json:"userLocale,omitempty"`
+	RecordMetadata  []string        `json:"recordMetadata,omitempty"`
+	Offset          string          `json:"offset,omitempty"`
+}
+
+type listSortField struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction,omitempty"`
+}
+
+func list[T any](baseUrl string, opts Options) (Records[T], error) {
 	var records Records[T]
 
 	if client == nil {
 		return records, fmt.Errorf("airtable.List: Undefined client. airtable.Init before request.")
 	}
 
-
-   query, err := newQuery[T](url, opts)
+	// Build initial query to check URL length
+	query, err := newQuery[T](baseUrl, opts)
 	if err != nil {
 		return records, fmt.Errorf("airtable.List: Error creating query: %s", err.Error())
 	}
 
+	queryUrl := query.Flush()
+	usePOST := len(queryUrl) > config.MaxUrlLength
+
+	// Get field names for POST request body
+	var fieldNames []string
+	if usePOST {
+		if len(opts.Fields) > 0 {
+			fieldNames = opts.Fields
+		} else {
+			var schema T
+			fieldNames, err = utils.GetStructFieldJsonNames(schema)
+			if err != nil {
+				return records, fmt.Errorf("airtable.List: Error getting field names: %s", err.Error())
+			}
+		}
+	}
+
+	var offset string
 	for {
 		var resp listResp[T]
-		queryUrl := query.Flush()
 
 		err := retry.Do(func() error {
-			httpReq, err := newHttpRequest(http.MethodGet, queryUrl, nil)
+			var httpReq *http.Request
+			var err error
+
+			if usePOST {
+				httpReq, err = createPOSTListRequest(baseUrl, opts, fieldNames, offset)
+			} else {
+				if offset != "" {
+					query.AddOffset(offset)
+					queryUrl = query.Flush()
+				}
+				httpReq, err = newHttpRequest(http.MethodGet, queryUrl, nil)
+			}
+
 			if err != nil {
 				return fmt.Errorf("airtable.List: Failed to create http request: %v", err)
 			}
@@ -53,27 +104,72 @@ func list[T any](url string, opts Options) (Records[T], error) {
 			break
 		}
 
-		query.AddOffset(resp.Offset)
+		offset = resp.Offset
 	}
 
 	return records, nil
 }
 
-func newQuery[T any](url string, opts Options) (*queryBuilder, error) {
+func createPOSTListRequest(baseUrl string, opts Options, fieldNames []string, offset string) (*http.Request, error) {
+	body := listRequestBody{
+		Fields:          fieldNames,
+		FilterByFormula: opts.Filter,
+		PageSize:        getPageSize(opts.Limit),
+		View:            opts.View,
+		CellFormat:      opts.CellFormat,
+		TimeZone:        opts.TimeZone,
+		UserLocale:      opts.UserLocale,
+		RecordMetadata:  opts.RecordMetadata,
+		Offset:          offset,
+	}
 
-	query := &queryBuilder{}
-	var schema T
+	if opts.MaxRecords > 0 {
+		body.MaxRecords = opts.MaxRecords
+	} else {
+		body.MaxRecords = getMaxRecords(opts.Limit)
+	}
 
-	fieldNames, err := utils.GetStructFieldJsonNames(schema)
+	// Convert sorts
+	for _, s := range opts.Sort {
+		body.Sort = append(body.Sort, listSortField(s))
+	}
 
+	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return query, err
+		return nil, err
+	}
+
+	// POST to /listRecords endpoint
+	listUrl := baseUrl + "/listRecords"
+	return newHttpRequest(http.MethodPost, listUrl, bytes.NewBuffer(jsonBody))
+}
+
+func newQuery[T any](url string, opts Options) (*queryBuilder, error) {
+	query := &queryBuilder{}
+
+	// Use explicit fields if provided, otherwise derive from schema
+	var fieldNames []string
+	if len(opts.Fields) > 0 {
+		fieldNames = opts.Fields
+	} else {
+		var schema T
+		var err error
+		fieldNames, err = utils.GetStructFieldJsonNames(schema)
+		if err != nil {
+			return query, err
+		}
 	}
 
 	query.NewWithUrl(url)
 	query.AddFields(fieldNames)
 	query.AddPageSize(getPageSize(opts.Limit))
-	query.AddMaxRecords(getMaxRecords(opts.Limit))
+
+	// Use MaxRecords if specified, otherwise fall back to Limit
+	if opts.MaxRecords > 0 {
+		query.AddMaxRecords(opts.MaxRecords)
+	} else {
+		query.AddMaxRecords(getMaxRecords(opts.Limit))
+	}
 
 	if !opts.Sort.Empty() {
 		query.AddSort(opts.Sort)
@@ -83,22 +179,26 @@ func newQuery[T any](url string, opts Options) (*queryBuilder, error) {
 		query.AddFilterByFormula(opts.Filter)
 	}
 
+	// New query parameters
+	query.AddView(opts.View)
+	query.AddCellFormat(opts.CellFormat)
+	query.AddTimeZone(opts.TimeZone)
+	query.AddUserLocale(opts.UserLocale)
+	query.AddRecordMetadata(opts.RecordMetadata)
+
 	return query, nil
 }
 
 func getPageSize(limit int) int {
-
-	if limit > 0 && limit < maxPageSize {
+	if limit > 0 && limit < config.MaxPageSize {
 		return limit
 	}
-	return maxPageSize
+	return config.MaxPageSize
 }
 
 func getMaxRecords(limit int) int {
-
 	if limit > 0 {
 		return limit
 	}
-
-	return maxPageSize
+	return config.MaxPageSize
 }
