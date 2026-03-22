@@ -9,6 +9,11 @@ import (
 	"github.com/Antfood/airgo/utils"
 )
 
+// filterFormula builds an Airtable filter formula for exact field matching
+func filterFormula(field, value string) string {
+	return fmt.Sprintf("{%s} = '%s'", field, value)
+}
+
 var defaultOptions = Options{
 	Limit:          10,
 	MaxRecords:     0,
@@ -324,7 +329,7 @@ func (t Table[T]) UpdateCtx(ctx context.Context, records ...*Record[T]) error {
 		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
 
 		if err != nil {
-			return fmt.Errorf("airtable.Update: Error converting struct to map: %v", err)
+			return &Error{Op: OpUpdate, Message: "failed to convert struct to map", Err: err}
 		}
 		updateRequests[i] = updateRequest{r.Id, fields, t.Options.Typecast}
 	}
@@ -373,7 +378,7 @@ func (t Table[T]) ReplaceCtx(ctx context.Context, records ...*Record[T]) error {
 		fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
 
 		if err != nil {
-			return fmt.Errorf("airtable.Replace: Error converting struct to map: %v", err)
+			return &Error{Op: OpReplace, Message: "failed to convert struct to map", Err: err}
 		}
 		replaceRequests[i] = replaceRequest{r.Id, fields, t.Options.Typecast}
 	}
@@ -421,7 +426,7 @@ func (t Table[T]) CreateCtx(ctx context.Context, records ...*Record[T]) error {
 		fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
 
 		if err != nil {
-			return fmt.Errorf("airtable.Create: Error converting struct to map: %v", err)
+			return &Error{Op: OpCreate, Message: "failed to convert struct to map", Err: err}
 		}
 
 		createRequests[i] = createRequest{fields, t.Options.Typecast}
@@ -509,14 +514,17 @@ func (t Table[T]) FindCtx(ctx context.Context, field, value string) (Records[T],
 	fieldNames, err := utils.GetStructFieldJsonNames(schema)
 
 	if err != nil {
-		return nil, fmt.Errorf("airtable.Find: Error getting struct field json names: %v", err)
+		return nil, &Error{Op: OpFind, Message: "failed to get struct field names", Err: err}
 	}
 
 	if slices.Contains(fieldNames, field) {
-		return t.WithFilter(fmt.Sprintf("{%s} = '%s'", field, value)).ListCtx(ctx)
+		return t.WithFilter(filterFormula(field, value)).ListCtx(ctx)
 	}
 
-	return nil, fmt.Errorf("airtable.Find: Field '%s' not found in schema %v", field, schema)
+	return nil, &ValidationError{
+		Op:      OpFind,
+		Message: "field '" + field + "' not found in schema",
+	}
 }
 
 /*
@@ -607,7 +615,11 @@ func (t *Table[T]) GetFieldCtx(ctx context.Context, nameOrId string) (*Field, er
 		}
 	}
 
-	return nil, fmt.Errorf("airtable.GetField: Field '%s' not found", nameOrId)
+	return nil, &APIError{
+		Op:      OpGetFields,
+		Type:    ErrTypeNotFound,
+		Message: "field '" + nameOrId + "' not found",
+	}
 }
 
 /*

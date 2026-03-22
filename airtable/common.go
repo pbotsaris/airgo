@@ -3,7 +3,6 @@ package airtable
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -113,12 +112,12 @@ func newHttpRequest(ctx context.Context, verb string, url string, body io.Reader
 
 /* */
 
-func makeRequest(client Client, httpReq *http.Request, r Responder) error {
+func makeRequest(client Client, httpReq *http.Request, r Responder, op Operation) error {
 
 	res, err := client.Do(httpReq)
 
 	if err != nil {
-		return fmt.Errorf("Error making request: %s", err.Error())
+		return &Error{Op: op, Message: "failed to make request", Err: err}
 	}
 
 	defer res.Body.Close()
@@ -127,14 +126,17 @@ func makeRequest(client Client, httpReq *http.Request, r Responder) error {
 		return &retry.HTTPError{StatusCode: res.StatusCode}
 	}
 
-	if err := json.NewDecoder(res.Body).Decode(r); err != nil {
-		return fmt.Errorf("Error decoding response: %s", err.Error())
+	bodyData, err := io.ReadAll(res.Body)
+	if err != nil {
+		return &Error{Op: op, Message: "failed to read response body", Err: err}
 	}
 
-	errMsg, ok := r.Err()["message"]
+	if err := json.Unmarshal(bodyData, r); err != nil {
+		return &Error{Op: op, Message: "failed to decode response", Err: err}
+	}
 
-	if ok { // airtable has returned an error
-		return fmt.Errorf("Airtable returned an error: '%s'", errMsg)
+	if errMap := r.Err(); len(errMap) > 0 {
+		return ParseAPIError(op, res.StatusCode, bodyData)
 	}
 
 	return nil

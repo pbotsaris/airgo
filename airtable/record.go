@@ -2,7 +2,6 @@ package airtable
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Antfood/airgo/utils"
 )
@@ -51,12 +50,12 @@ Example:
 	err = record.SaveCtx(ctx)
 */
 func (r *Record[T]) SaveCtx(ctx context.Context) error {
-	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
+	url := config.EndpointUrl + "/" + r.BaseId + "/" + r.TableId
 
 	fields, err := utils.StructJsonToMap(r.Fields, utils.WithIgnore())
 
 	if err != nil {
-		return fmt.Errorf("airtable.Record.Save: %s", err.Error())
+		return &Error{Op: OpSave, Message: "failed to convert fields to map", Err: err}
 	}
 
 	/* If the record has no Id, it's a new record */
@@ -105,7 +104,7 @@ func (r *Record[T]) DestroyCtx(ctx context.Context) (*destroyedRecord, error) {
 	}
 
 	if len(records) == 0 {
-		return nil, fmt.Errorf("airtable.Record.Destroy: Delete returned no records")
+		return nil, &Error{Op: OpDestroy, Message: "delete returned no records"}
 	}
 
 	records[0].Id = r.Id
@@ -143,14 +142,18 @@ Example:
 */
 func (r *Record[T]) ReplaceCtx(ctx context.Context) error {
 	if r.Id == "" {
-		return fmt.Errorf("airtable.Record.Replace: Cannot replace record without Id")
+		return &ValidationError{
+			Op:      OpReplace,
+			Message: "record ID required for replace",
+			Err:     ErrMissingRecordID,
+		}
 	}
 
-	url := fmt.Sprintf("%s/%s/%s", config.EndpointUrl, r.BaseId, r.TableId)
+	url := config.EndpointUrl + "/" + r.BaseId + "/" + r.TableId
 
 	fields, err := utils.StructJsonToMap(r.Fields, utils.WithoutIgnore())
 	if err != nil {
-		return fmt.Errorf("airtable.Record.Replace: %s", err.Error())
+		return &Error{Op: OpReplace, Message: "failed to convert fields to map", Err: err}
 	}
 
 	return replace(ctx, url, Records[T]{r}, replaceRequest{Id: r.Id, Fields: fields, Typecast: r.Typecast})

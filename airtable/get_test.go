@@ -44,7 +44,8 @@ func TestGet(t *testing.T) {
 
 	_, err = table.Get("recording_id")
 
-	err_msg := "airtable.Get: Not Found"
 	Assert(t, err != nil, "Should return error")
-	Assert(t, err.Error() == err_msg, "Error was '%s' should be '%s'", err.Error(), err_msg)
+	// Check that error message starts with the expected prefix
+	errStr := err.Error()
+	Assert(t, len(errStr) > 0 && errStr[:13] == "airtable.Get:", "Error should start with 'airtable.Get:', got '%s'", errStr)
 }

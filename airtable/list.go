@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/Antfood/airgo/retry"
@@ -45,13 +44,13 @@ func list[T any](ctx context.Context, baseUrl string, opts Options) (Records[T],
 	var records Records[T]
 
 	if client == nil {
-		return records, fmt.Errorf("airtable.List: Undefined client. airtable.Init before request.")
+		return records, NewConfigError(OpList, "client not configured; call SetToken or Configure first")
 	}
 
 	// Build initial query to check URL length
 	query, err := newQuery[T](baseUrl, opts)
 	if err != nil {
-		return records, fmt.Errorf("airtable.List: Error creating query: %s", err.Error())
+		return records, &Error{Op: OpList, Message: "failed to create query", Err: err}
 	}
 
 	queryUrl := query.Flush()
@@ -66,7 +65,7 @@ func list[T any](ctx context.Context, baseUrl string, opts Options) (Records[T],
 			var schema T
 			fieldNames, err = utils.GetStructFieldJsonNames(schema)
 			if err != nil {
-				return records, fmt.Errorf("airtable.List: Error getting field names: %s", err.Error())
+				return records, &Error{Op: OpList, Message: "failed to get field names", Err: err}
 			}
 		}
 	}
@@ -95,13 +94,13 @@ func list[T any](ctx context.Context, baseUrl string, opts Options) (Records[T],
 			}
 
 			if err != nil {
-				return fmt.Errorf("airtable.List: Failed to create http request: %v", err)
+				return &Error{Op: OpList, Message: "failed to create http request", Err: err}
 			}
-			return makeRequest(client, httpReq, &resp)
+			return makeRequest(client, httpReq, &resp, OpList)
 		})
 
 		if err != nil {
-			return records, fmt.Errorf("airtable.List: %v", err)
+			return records, err
 		}
 
 		records = append(records, resp.Records...)

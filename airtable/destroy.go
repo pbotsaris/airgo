@@ -2,7 +2,6 @@ package airtable
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/Antfood/airgo/retry"
@@ -31,7 +30,7 @@ func destroy[T any](ctx context.Context, deleteUrl string, records ...*Record[T]
 	var resp destroyResp
 
 	if client == nil {
-		return destroyed, fmt.Errorf("airtable.destroy: Undefined client. Use airtable.Init before request")
+		return destroyed, NewConfigError(OpDestroy, "client not configured; call SetToken or Configure first")
 	}
 
 	if err := verifyRecordId(records); err != nil {
@@ -48,13 +47,13 @@ func destroy[T any](ctx context.Context, deleteUrl string, records ...*Record[T]
 	err := retry.DoCtx(ctx, func() error {
 		httpReq, err := newHttpRequest(ctx, http.MethodDelete, queryUrl, nil)
 		if err != nil {
-			return fmt.Errorf("airtable.destroy: Failed to create http request: %v", err)
+			return &Error{Op: OpDestroy, Message: "failed to create http request", Err: err}
 		}
-		return makeRequest(client, httpReq, &resp)
+		return makeRequest(client, httpReq, &resp, OpDestroy)
 	})
 
 	if err != nil {
-		return destroyed, fmt.Errorf("airtable.Destroy: %v", err)
+		return destroyed, err
 	}
 
 	return resp.DestroyedRecords, nil
@@ -63,7 +62,11 @@ func destroy[T any](ctx context.Context, deleteUrl string, records ...*Record[T]
 func verifyRecordId[T any](records []*Record[T]) error {
 	for _, record := range records {
 		if record.Id == "" {
-			return fmt.Errorf("airtable.destroy: Undefined record id: %v", record)
+			return &ValidationError{
+				Op:      OpDestroy,
+				Message: "record ID required",
+				Err:     ErrMissingRecordID,
+			}
 		}
 	}
 	return nil

@@ -404,6 +404,68 @@ airtable.ConfigureWithOptions(airtable.Config{
 })
 ```
 
+### Error Types
+
+All errors returned by the library are structured types that preserve context from the Airtable API. Use `errors.Is()` to check for common error conditions:
+
+```go
+records, err := table.List()
+if err != nil {
+    if errors.Is(err, airtable.ErrNotFound) {
+        // Resource not found (404 or NOT_FOUND error type)
+    }
+    if errors.Is(err, airtable.ErrUnauthorized) {
+        // Authentication/permission issue (401, 403)
+    }
+    if errors.Is(err, airtable.ErrRateLimited) {
+        // Rate limited (429)
+    }
+    if errors.Is(err, airtable.ErrValidation) {
+        // Invalid request or value
+    }
+    if errors.Is(err, airtable.ErrNotConfigured) {
+        // Client not configured (forgot to call SetToken)
+    }
+}
+```
+
+### Extracting Error Details
+
+Use `errors.As()` to extract detailed error information:
+
+```go
+records, err := table.List()
+if err != nil {
+    var apiErr *airtable.APIError
+    if errors.As(err, &apiErr) {
+        fmt.Printf("Operation: %s\n", apiErr.Op)         // e.g., "List"
+        fmt.Printf("Status: %d\n", apiErr.StatusCode)    // e.g., 403
+        fmt.Printf("Type: %s\n", apiErr.Type)            // e.g., "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"
+        fmt.Printf("Message: %s\n", apiErr.Message)      // Human-readable message
+    }
+}
+```
+
+### Sentinel Errors
+
+| Error | Description |
+|-------|-------------|
+| `ErrNotFound` | Resource not found (404 or `NOT_FOUND` type) |
+| `ErrUnauthorized` | Auth issues (401, 403, `UNAUTHORIZED`, `INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND`) |
+| `ErrRateLimited` | Rate limited (429) |
+| `ErrValidation` | Invalid request or value (`INVALID_VALUE`, `INVALID_REQUEST`) |
+| `ErrNotConfigured` | Client not configured |
+| `ErrMissingRecordID` | Operation requires a record ID |
+
+### Error Structs
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `APIError` | `Op`, `StatusCode`, `Type`, `Message` | Airtable API errors |
+| `ValidationError` | `Op`, `Message`, `Field` | Local validation errors |
+| `ConfigError` | `Op`, `Message` | Configuration errors |
+| `HTTPError` | `Op`, `StatusCode`, `Message` | HTTP-level errors |
+
 ## Development
 
 ### Make Commands

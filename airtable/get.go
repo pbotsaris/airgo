@@ -3,7 +3,7 @@ package airtable
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/Antfood/airgo/retry"
@@ -12,24 +12,28 @@ import (
 func get[T any](ctx context.Context, getUrl string, record Record[T]) (Record[T], error) {
 
 	if client == nil {
-		return record, fmt.Errorf("airtable.Get: Undefined client. Use airtable.Init before request")
+		return record, NewConfigError(OpGet, "client not configured; call SetToken or Configure first")
 	}
 
 	if record.Id == "" {
-		return record, fmt.Errorf("airtable.Get: Undefined record id")
+		return record, &ValidationError{
+			Op:      OpGet,
+			Message: "record ID required",
+			Err:     ErrMissingRecordID,
+		}
 	}
 
-	url := fmt.Sprintf("%s/%s", getUrl, record.Id)
+	url := getUrl + "/" + record.Id
 
 	err := retry.DoCtx(ctx, func() error {
 		httpReq, err := newHttpRequest(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return err
+			return &Error{Op: OpGet, Message: "failed to create http request", Err: err}
 		}
 
 		res, err := client.Do(httpReq)
 		if err != nil {
-			return fmt.Errorf("airtable.Get: %s", err.Error())
+			return &Error{Op: OpGet, Message: "failed to make request", Err: err}
 		}
 		defer res.Body.Close()
 
@@ -37,12 +41,17 @@ func get[T any](ctx context.Context, getUrl string, record Record[T]) (Record[T]
 			return &retry.HTTPError{StatusCode: res.StatusCode}
 		}
 
-		if err := json.NewDecoder(res.Body).Decode(&record); err != nil {
-			return fmt.Errorf("airtable.Get: %s", err.Error())
+		bodyData, err := io.ReadAll(res.Body)
+		if err != nil {
+			return &Error{Op: OpGet, Message: "failed to read response body", Err: err}
+		}
+
+		if err := json.Unmarshal(bodyData, &record); err != nil {
+			return &Error{Op: OpGet, Message: "failed to decode response", Err: err}
 		}
 
 		if record.Error.Message != "" {
-			return fmt.Errorf("airtable.Get: %s", record.Error)
+			return ParseAPIError(OpGet, res.StatusCode, bodyData)
 		}
 
 		return nil

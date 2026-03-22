@@ -18,7 +18,7 @@ type testSaveRecordSchema struct {
 func TestUpsert(t *testing.T) {
 	t.Run("testCreateReturnReturnId", testCreateReturnReturnId)
 	t.Run("testUpdateMultipleRecords", testUpdateMultipleRecords)
-	t.Run("testGetMsgPrefix", testGetPrefix)
+	t.Run("testGetOperation", testGetOperation)
 	t.Run("testGetMethod", testGetMethod)
 	t.Run("testHandleError", testHandleError)
 }
@@ -57,15 +57,15 @@ func testUpdateMultipleRecords(t *testing.T) {
 	Assert(t, err == nil, "Expected no error, got '%s'", err)
 }
 
-func testGetPrefix(t *testing.T) {
-	msg := getMsgPrefix([]createRequest{})
-	Assert(t, msg == createPrefix, "Expected '%s', got '%s'", createPrefix, msg)
+func testGetOperation(t *testing.T) {
+	op := getOperation([]createRequest{})
+	Assert(t, op == OpCreate, "Expected '%s', got '%s'", OpCreate, op)
 
-	msg = getMsgPrefix([]updateRequest{})
-	Assert(t, msg == updatePrefix, "Expected '%s', got '%s'", updatePrefix, msg)
+	op = getOperation([]updateRequest{})
+	Assert(t, op == OpUpdate, "Expected '%s', got '%s'", OpUpdate, op)
 
-	msg = getMsgPrefix([]replaceRequest{})
-	Assert(t, msg == replacePrefix, "Expected '%s', got '%s'", replacePrefix, msg)
+	op = getOperation([]replaceRequest{})
+	Assert(t, op == OpReplace, "Expected '%s', got '%s'", OpReplace, op)
 }
 
 func testGetMethod(t *testing.T) {
@@ -79,23 +79,19 @@ func testGetMethod(t *testing.T) {
 	Assert(t, method == http.MethodPut, "Expected '%s', got '%s'", http.MethodPut, method)
 }
 
-func TestGetVerb(t *testing.T) {
-	verb := getVerb(createPrefix)
-	Assert(t, verb == "create", "Expected '%s', got '%s'", "create", verb)
-
-	verb = getVerb(updatePrefix)
-	Assert(t, verb == "update", "Expected '%s', got '%s'", "update", verb)
-
-	verb = getVerb(replacePrefix)
-	Assert(t, verb == "replace", "Expected '%s', got '%s'", "replace", verb)
-}
-
 func testHandleError(t *testing.T) {
 	msg := "Not Found"
-	inBody := testErrorBody{}
-	inBody.Error.Message = msg
+	errType := "NOT_FOUND"
 
-	jsonBody, err := json.Marshal(inBody)
+	// Create a proper Airtable error response
+	errBody := map[string]any{
+		"error": map[string]any{
+			"type":    errType,
+			"message": msg,
+		},
+	}
+
+	jsonBody, err := json.Marshal(errBody)
 	Ok(t, err)
 
 	client := newMockClient(
@@ -109,11 +105,15 @@ func testHandleError(t *testing.T) {
 	resp, _ := client.Do(req)
 	Assert(t, resp.StatusCode == 404, "Expected '%d', got '%d'", 404, resp.StatusCode)
 
-	err = handleError(resp, createPrefix)
+	err = handleError(resp, OpCreate)
 	Assert(t, err != nil, "Expected error, got nil")
 
-	errMsg := "airtable.Create: Failed to create with status: '404' and message: 'Not Found'"
-	Assert(t, err.Error() == errMsg, "Expected '%s', got '%s'", errMsg, err.Error())
+	// Check that it's an APIError with the right fields
+	var apiErr *APIError
+	Assert(t, errors.As(err, &apiErr), "Expected error to be APIError")
+	Assert(t, apiErr.StatusCode == 404, "Expected status 404, got %d", apiErr.StatusCode)
+	Assert(t, string(apiErr.Type) == errType, "Expected type '%s', got '%s'", errType, apiErr.Type)
+	Assert(t, apiErr.Message == msg, "Expected message '%s', got '%s'", msg, apiErr.Message)
 }
 
 func getMockRecord(t *testing.T, json []byte) Records[testRecordSchema] {

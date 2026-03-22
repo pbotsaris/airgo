@@ -46,14 +46,14 @@ func TestMakeRequest(t *testing.T) {
 
 	resp := new(listResp[TestListRecordSchema])
 
-	err = makeRequest(client, httpReq, resp)
+	err = makeRequest(client, httpReq, resp, OpList)
 	Assert(t, err == nil, "Expected no error, got '%s'", err)
 
 	client = newMockClient(404, jsonData, fmt.Errorf("404 Not Found"))
 
-	err = makeRequest(client, httpReq, resp)
+	err = makeRequest(client, httpReq, resp, OpList)
 	Assert(t, err != nil, "Expected error, got '%s'", err)
 
-	want := "Error making request: 404 Not Found"
-	Assert(t, err.Error() == want, "Expected '%s', got '%s'", want, err.Error())
+	want := "airtable.List: failed to make request"
+	Assert(t, err.Error()[:len(want)] == want, "Expected error to start with '%s', got '%s'", want, err.Error())
 }

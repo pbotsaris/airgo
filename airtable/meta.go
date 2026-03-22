@@ -3,7 +3,7 @@ package airtable
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"sync"
 
@@ -102,22 +102,22 @@ func ClearFieldCache() {
 
 func fetchTableFields(ctx context.Context, baseId, tableId string) ([]Field, error) {
 	if client == nil {
-		return nil, fmt.Errorf("airtable.fetchTableFields: Undefined client. Use airtable.SetToken before request")
+		return nil, NewConfigError(OpGetFields, "client not configured; call SetToken or Configure first")
 	}
 
-	url := fmt.Sprintf("%s%s/%s/tables", config.EndpointUrl, metaBasePath, baseId)
+	url := config.EndpointUrl + metaBasePath + "/" + baseId + "/tables"
 
 	var resp metaResponse
 
 	err := retry.DoCtx(ctx, func() error {
 		httpReq, err := newHttpRequest(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return fmt.Errorf("airtable.fetchTableFields: Failed to create http request: %v", err)
+			return &Error{Op: OpGetFields, Message: "failed to create http request", Err: err}
 		}
 
 		res, err := client.Do(httpReq)
 		if err != nil {
-			return fmt.Errorf("airtable.fetchTableFields: %s", err.Error())
+			return &Error{Op: OpGetFields, Message: "failed to make request", Err: err}
 		}
 		defer res.Body.Close()
 
@@ -125,12 +125,17 @@ func fetchTableFields(ctx context.Context, baseId, tableId string) ([]Field, err
 			return &retry.HTTPError{StatusCode: res.StatusCode}
 		}
 
-		if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-			return fmt.Errorf("airtable.fetchTableFields: %s", err.Error())
+		bodyData, err := io.ReadAll(res.Body)
+		if err != nil {
+			return &Error{Op: OpGetFields, Message: "failed to read response body", Err: err}
 		}
 
-		if errMsg, ok := resp.Error["message"]; ok {
-			return fmt.Errorf("airtable.fetchTableFields: %s", errMsg)
+		if err := json.Unmarshal(bodyData, &resp); err != nil {
+			return &Error{Op: OpGetFields, Message: "failed to decode response", Err: err}
+		}
+
+		if len(resp.Error) > 0 {
+			return ParseAPIError(OpGetFields, res.StatusCode, bodyData)
 		}
 
 		return nil
@@ -146,5 +151,9 @@ func fetchTableFields(ctx context.Context, baseId, tableId string) ([]Field, err
 		}
 	}
 
-	return nil, fmt.Errorf("airtable.fetchTableFields: Table '%s' not found in base '%s'", tableId, baseId)
+	return nil, &APIError{
+		Op:      OpGetFields,
+		Type:    ErrTypeNotFound,
+		Message: "table '" + tableId + "' not found in base '" + baseId + "'",
+	}
 }

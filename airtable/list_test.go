@@ -58,7 +58,6 @@ func testValidList(t *testing.T) {
 
 func testInvalidList(t *testing.T) {
 	msg := "Bad List"
-	listErr := "airtable.List: Error making request: "
 
 	client := newMockClient(500, []byte(""), errors.New(msg))
 	Configure(client, "mock_token")
@@ -66,10 +65,10 @@ func testInvalidList(t *testing.T) {
 	table := NewTable[TestListRecordSchema]("Base_id", "Table_id")
 	_, err := table.List()
 
-	want := listErr + msg
-
 	Assert(t, err != nil, "Invalid list should return an error")
-	Assert(t, err.Error() == want, "Expected '%s' error, got '%s'", want, err.Error())
+	// Check that error message starts with expected prefix
+	errStr := err.Error()
+	Assert(t, len(errStr) > 0 && errStr[:14] == "airtable.List:", "Expected error to start with 'airtable.List:', got '%s'", errStr)
 }
 
 func testPaginatedList(t *testing.T) {

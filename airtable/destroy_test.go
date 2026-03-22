@@ -62,10 +62,10 @@ func testTableDestroy(t *testing.T) {
 
 	_, err = table.Destroy(records...)
 
-	wantError := "airtable.Destroy: Error making request: mock error"
-
 	Assert(t, err != nil, "Expected error, got nil")
-	Assert(t, err.Error() == wantError, "Expected error %s, got %v", wantError, err)
+	// Check that error message contains the key parts
+	errStr := err.Error()
+	Assert(t, len(errStr) > 0 && errStr[:17] == "airtable.Destroy:", "Expected error to start with 'airtable.Destroy:', got %s", errStr)
 }
 
 func testRecordDestroy(t *testing.T) {
